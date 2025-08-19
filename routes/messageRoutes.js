@@ -1,0 +1,9 @@
+import express from 'express';
+import { getMessagesForPost } from '../controllers/messageController.js';
+import { protect } from '../middleware/authMiddleware.js';
+
+const router = express.Router();
+
+router.route('/:postId').get(protect, getMessagesForPost);
+
+export default router;

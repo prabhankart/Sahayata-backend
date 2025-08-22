@@ -5,11 +5,14 @@ import Post from '../models/Post.js';
 // @access  Private
 export const createPost = async (req, res) => {
   try {
-    const { title, description, location, image } = req.body;
+  const { title, description, location, image, category, urgency } = req.body;
+
 
     const postData = {
       title,
       description,
+      category, // Add to postData
+      urgency,
       user: req.user._id,
        image,
     };
@@ -28,6 +31,7 @@ export const createPost = async (req, res) => {
     res.status(201).json(createdPost);
   } catch (error) {
     console.error(error);
+        console.error('Error in createPost:', error);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -78,6 +82,9 @@ export const getPosts = async (req, res) => {
 // @desc    Pledge or unpledge to a post
 // @route   PUT /api/posts/:id/pledge
 // @access  Private
+// @desc    Pledge or unpledge to a post
+// @route   PUT /api/posts/:id/pledge
+// @access  Private
 export const pledgeToPost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
@@ -86,27 +93,34 @@ export const pledgeToPost = async (req, res) => {
       return res.status(404).json({ message: 'Post not found' });
     }
 
-    // Check if the user has already pledged
-    const isPledged = post.pledgedBy.some(
-      (id) => id.toString() === req.user._id.toString()
-    );
+    const isPledged = post.pledgedBy.some(id => id.toString() === req.user._id.toString());
 
     if (isPledged) {
-      // If already pledged, remove the pledge
-      post.pledgedBy = post.pledgedBy.filter(
-        (id) => id.toString() !== req.user._id.toString()
-      );
+      post.pledgedBy = post.pledgedBy.filter(id => id.toString() !== req.user._id.toString());
     } else {
-      // Otherwise, add the pledge
       post.pledgedBy.push(req.user._id);
     }
 
-    await post.save();
-    // Populate user data before sending response
-    const updatedPost = await Post.findById(req.params.id).populate('user', 'name').populate('pledgedBy', 'name');
-    res.json(updatedPost);
+    // --- THIS IS THE FIX ---
+    // If this is an old post without a category or urgency, assign defaults before saving.
+    if (!post.category) {
+        post.category = 'Other';
+    }
+    if (!post.urgency) {
+        post.urgency = 'Medium';
+    }
+    // --- END OF FIX ---
 
+    const savedPost = await post.save();
+
+    const populatedPost = await savedPost.populate([
+        { path: 'user', select: 'name' },
+        { path: 'pledgedBy', select: 'name' }
+    ]);
+
+    res.json(populatedPost);
   } catch (error) {
+    console.error("Pledge Error:", error);
     res.status(500).json({ message: 'Server Error' });
   }
 };
@@ -197,11 +211,32 @@ export const updatePost = async (req, res) => {
     post.title = req.body.title || post.title;
     post.description = req.body.description || post.description;
     post.image = req.body.image; // Allow image to be updated (can be an empty string to remove it)
+    post.category = req.body.category || post.category; // Add category
+    post.urgency = req.body.urgency || post.urgency;   // Add urgency
     
     const updatedPost = await post.save();
     res.json(updatedPost);
   } catch (error) {
     console.error('Error updating post:', error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+// @access  Private
+export const updatePostStatus = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Post not found' });
+    if (post.user.toString() !== req.user.id) return res.status(401).json({ message: 'User not authorized' });
+
+    post.status = req.body.status || post.status; // e.g., "Resolved"
+    await post.save();
+
+    const populatedPost = await post.populate([
+        { path: 'user', select: 'name' },
+        { path: 'pledgedBy', select: 'name' }
+    ]);
+    res.json(populatedPost);
+  } catch (error) {
     res.status(500).json({ message: 'Server Error' });
   }
 };

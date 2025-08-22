@@ -127,9 +127,11 @@ export const updateUserProfile = async (req, res) => {
     const user = await User.findById(req.user.id);
 
     if (user) {
-      user.name = req.body.name || user.name;
+       user.name = req.body.name || user.name;
       user.location = req.body.location || user.location;
-      // We can add other fields to update here in the future
+      user.bio = req.body.bio || user.bio;
+      user.skills = req.body.skills || user.skills;
+      user.availability = req.body.availability || user.availability;
 
       const updatedUser = await user.save();
 
@@ -151,4 +153,16 @@ export const updateUserProfile = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Server Error' });
   }
+};
+export const getUserProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('-password -email');
+        if (user) {
+            res.json(user);
+        } else {
+            res.status(404).json({ message: 'User not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Server Error' });
+    }
 };

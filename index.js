@@ -23,6 +23,7 @@ import friendRoutes from './routes/friendRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import reviewRoutes from './routes/reviewRoutes.js';
 // --- Initialization ---
 const app = express();
 const server = http.createServer(app);
@@ -75,6 +76,7 @@ app.use('/api/auth', authRoutes); // This is the route for Google login
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/upload', uploadRoutes); 
+app.use('/api/reviews', reviewRoutes);
 
 // --- Socket.IO Connection Logic ---
 io.on('connection', (socket) => {

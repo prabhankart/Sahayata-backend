@@ -11,6 +11,17 @@ const postSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  category: {
+  type: String,
+  required: true,
+  enum: ['Home & Repair', 'Tutoring & Learning', 'Tech Support', 'Errands & Shopping', 'Health & Wellness', 'Other'],
+},
+urgency: {
+  type: String,
+  required: true,
+  enum: ['Low', 'Medium', 'High'],
+  default: 'Medium',
+},
   description: {
     type: String,
     required: true,

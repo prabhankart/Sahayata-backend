@@ -1,5 +1,5 @@
 import express from 'express';
-import { createPost, getPosts, pledgeToPost, getPostById, voteOnPost,updatePost, deletePost  } from '../controllers/postController.js';
+import { createPost, getPosts, pledgeToPost, getPostById, voteOnPost,updatePost, deletePost,updatePostStatus  } from '../controllers/postController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -10,6 +10,7 @@ router.route('/:id').get(getPostById);
 router.route('/:id/vote').put(protect, voteOnPost);
 router.route('/:id/pledge').put(protect, pledgeToPost);
 router.route('/:id').get(getPostById).delete(protect, deletePost);
+router.route('/:id/status').put(protect, updatePostStatus);
 router.route('/:id')
   .get(getPostById)
   .put(protect, updatePost)

@@ -14,7 +14,7 @@ import morgan from 'morgan';
 import xssInPlace from './middleware/xssInPlace.js';
 import safeSanitize from './middleware/safeSanitize.js';
 import cookieParser from 'cookie-parser';
-
+import path from "path";
 // Models used by sockets
 import User from './models/User.js';
 import Message from './models/Message.js';
@@ -91,6 +91,7 @@ app.use(cookieParser());
 app.use(xssInPlace);
 app.use(compression());
 app.use(morgan('tiny'));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.use(
   session({

@@ -1,3 +1,4 @@
+// routes/postRoutes.js
 import express from 'express';
 import { protect } from '../middleware/authMiddleware.js';
 import {
@@ -11,20 +12,17 @@ import {
   updatePostStatus,
   addView,
 } from '../controllers/postController.js';
-import multer from 'multer';
+import upload from '../middleware/uploadMiddleware.js';  // ✅ use Cloudinary config
 
 const router = express.Router();
 
-// Use memory storage for now (can switch to Cloudinary/S3 later)
-const upload = multer({ storage: multer.memoryStorage() });
-
 router.route('/')
   .get(getPosts)
-  .post(protect, upload.single("image"), createPost);
+  .post(protect, upload.single("image"), createPost);  // ✅ sends URL in req.file.path
 
 router.route('/:id')
   .get(getPostById)
-  .put(protect, updatePost)
+  .put(protect, upload.single("image"), updatePost)   // ✅ allow updating image too
   .delete(protect, deletePost);
 
 router.put('/:id/vote', protect, voteOnPost);

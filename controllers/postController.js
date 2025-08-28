@@ -3,7 +3,7 @@ import Post from '../models/Post.js';
 /** POST /api/posts */
 export const createPost = async (req, res) => {
   try {
-    const { title, description, category, urgency, image, location } = req.body;
+    const { title, description, category, urgency, location } = req.body;
 
     if (!title || !description) {
       return res.status(400).json({ message: "Title and description are required" });
@@ -12,11 +12,22 @@ export const createPost = async (req, res) => {
     // ✅ Safe location handling
     let loc = null;
     if (location) {
-      if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
-        loc = { type: "Point", coordinates: location.coordinates };
-      } else if (typeof location.lat === "number" && typeof location.lng === "number") {
-        loc = { type: "Point", coordinates: [location.lng, location.lat] };
+      try {
+        const parsed = typeof location === "string" ? JSON.parse(location) : location;
+        if (Array.isArray(parsed.coordinates) && parsed.coordinates.length === 2) {
+          loc = { type: "Point", coordinates: parsed.coordinates };
+        } else if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+          loc = { type: "Point", coordinates: [parsed.lng, parsed.lat] };
+        }
+      } catch (e) {
+        console.warn("Invalid location format");
       }
+    }
+
+    // ✅ Handle image uploaded via Cloudinary
+    let imageUrl = "";
+    if (req.file && req.file.path) {
+      imageUrl = req.file.path; // Cloudinary gives full https://... URL
     }
 
     const post = new Post({
@@ -25,9 +36,9 @@ export const createPost = async (req, res) => {
       description,
       category: category || "Other",
       urgency: urgency || "Medium",
-      image: image || "", // optional
+      image: imageUrl,
       status: "Open",
-      location: loc,      // only attach if valid
+      location: loc,
     });
 
     const saved = await post.save();
@@ -42,6 +53,7 @@ export const createPost = async (req, res) => {
     res.status(500).json({ message: "Server Error", error: err.message });
   }
 };
+
 
 /** GET /api/posts?search=&lat=&lng= */
 export const getPosts = async (req, res) => {

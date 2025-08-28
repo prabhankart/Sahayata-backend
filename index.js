@@ -1,4 +1,3 @@
-// server.js
 import 'dotenv/config';
 import express from 'express';
 import mongoose from 'mongoose';
@@ -42,15 +41,6 @@ import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 const app = express();
 const server = http.createServer(app);
 
-// ---------- Socket.IO ----------
-const io = new Server(server, {
-  cors: {
-    origin: (origin, cb) => cb(null, true), // transport CORS is not strict; HTTP CORS below is
-    methods: ['GET', 'POST'],
-  },
-});
-app.set('io', io); // <-- make io available inside controllers via req.app.get('io')
-
 // ---------- Config ----------
 const PORT = process.env.PORT || 5000;
 configurePassport(passport);
@@ -66,30 +56,35 @@ const connectDB = async () => {
   }
 };
 
-// ---------- Middleware (order matters) ----------
-app.use(helmet());
-
-/** CORS for HTTP routes (strict, but dev-friendly) */
+// ---------- CORS Setup ----------
 const envOrigins = (process.env.CLIENT_ORIGINS || process.env.CLIENT_ORIGIN || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-// Default dev origins
-const devOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
-const allowList = Array.from(new Set([...devOrigins, ...envOrigins]));
+// Default dev + prod origins
+const devOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+const prodOrigins = [
+  'https://sahayata-frontend.vercel.app',   // ✅ Vercel frontend
+];
+
+const allowList = Array.from(new Set([...devOrigins, ...prodOrigins, ...envOrigins]));
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      // allow tools / curl (no origin) and allow-listed origins
-      if (!origin || allowList.length === 0 || allowList.includes(origin)) return cb(null, true);
+      if (!origin || allowList.includes(origin)) return cb(null, true);
       return cb(new Error(`CORS: origin not allowed: ${origin}`), false);
     },
     credentials: true,
   })
 );
 
+// ---------- Middleware ----------
+app.use(helmet());
 app.use(express.json({ limit: '1mb' }));
 app.use(safeSanitize);
 app.use(cookieParser());
@@ -107,7 +102,7 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Rate-limit auth endpoints a bit
+// Rate-limit auth endpoints
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 app.use('/api/users/login', authLimiter);
 app.use('/api/users/register', authLimiter);
@@ -130,14 +125,24 @@ app.use('/api/groups', groupRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-// ---------- Socket.IO events ----------
+// ---------- Socket.IO ----------
+const io = new Server(server, {
+  cors: {
+    origin: allowList,
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+app.set('io', io);
+
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
 
-  // Post/project room chat (existing)
+  // Post/project chat
   socket.on('joinRoom', ({ postId }) => {
     if (postId) socket.join(postId);
   });
+
   socket.on('sendMessage', async ({ postId, senderId, text }) => {
     try {
       if (!postId || !senderId || !text?.trim()) return;
@@ -152,10 +157,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Private conversation chat (existing)
+  // Private chat
   socket.on('joinConversation', ({ conversationId }) => {
     if (conversationId) socket.join(conversationId);
   });
+
   socket.on('sendPrivateMessage', async ({ conversationId, senderId, text }) => {
     try {
       if (!conversationId || !senderId || !text?.trim()) return;
@@ -170,15 +176,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  // NEW: Group chat rooms (used by GroupPage)
+  // Group chat
   socket.on('group:join', (groupId) => {
-    if (!groupId) return;
-    socket.join(`group:${groupId}`);
+    if (groupId) socket.join(`group:${groupId}`);
   });
-
   socket.on('group:leave', (groupId) => {
-    if (!groupId) return;
-    socket.leave(`group:${groupId}`);
+    if (groupId) socket.leave(`group:${groupId}`);
   });
 
   socket.on('disconnect', () => console.log('Socket disconnected:', socket.id));

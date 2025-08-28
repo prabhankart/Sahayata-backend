@@ -1,52 +1,50 @@
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 
-// @desc    Get all conversations for a user
-// @route   GET /api/conversations
 export const getConversations = async (req, res) => {
   try {
-    const conversations = await Conversation.find({ participants: req.user._id })
-      .populate('participants', 'name');
-    res.json(conversations);
-  } catch (error) {
+    const me = req.user._id;
+    const items = await Conversation.find({ participants: me })
+      .populate('participants', 'name avatar')
+      .sort({ updatedAt: -1 });
+    res.json(items);
+  } catch {
     res.status(500).json({ message: 'Server Error' });
   }
 };
 
-// @desc    Get messages for a specific conversation
-// @route   GET /api/conversations/:conversationId/messages
-export const getConversationMessages = async (req, res) => {
-  try {
-    const messages = await Message.find({ conversation: req.params.conversationId })
-      .populate('sender', 'name');
-    res.json(messages);
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
-  }
-};
 export const startOrGetConversation = async (req, res) => {
   try {
-    const { recipientId } = req.params;
-    const myId = req.user._id;
+    const me = req.user._id.toString();
+    const otherUserId = String(req.params.recipientId);
+    const key = [me, otherUserId].sort().join(':');
 
-    // Find if a conversation already exists between the two users
-    let conversation = await Conversation.findOne({
-      participants: { $all: [myId, recipientId] },
-    });
+    const convo = await Conversation.findOneAndUpdate(
+      { participantsKey: key },
+      { $setOnInsert: { participants: [me, otherUserId], participantsKey: key } },
+      { new: true, upsert: true }
+    ).populate('participants', 'name avatar');
 
-    // If no conversation exists, create one
-    if (!conversation) {
-      conversation = await Conversation.create({
-        participants: [myId, recipientId],
-      });
-    }
+    res.json(convo);
+  } catch {
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
 
-    // Return the full conversation populated with participant details
-    const fullConversation = await Conversation.findById(conversation._id)
-      .populate('participants', 'name');
+export const getConversationMessages = async (req, res) => {
+  try {
+    const p = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const l = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip = (p - 1) * l;
 
-    res.status(200).json(fullConversation);
-  } catch (error) {
+    const docs = await Message.find({ conversation: req.params.conversationId })
+      .populate('sender', 'name avatar')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(l);
+
+    res.json({ data: docs.reverse(), page: p });
+  } catch {
     res.status(500).json({ message: 'Server Error' });
   }
 };

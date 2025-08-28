@@ -1,20 +1,17 @@
 import express from 'express';
-// Make sure 'getFriendships' is included in this import list
 import { 
-    sendFriendRequest, 
-    getPendingRequests, 
-    respondToRequest, 
-    getFriendships 
+  sendFriendRequest, 
+  getPendingRequests, 
+  respondToRequest, 
+  getFriendships,
+  getSentRequests                // ✅ ADD THIS
 } from '../controllers/friendController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
-
-// This is the route that was causing the error
-router.route('/').get(protect, getFriendships);
-
-router.route('/requests').get(protect, getPendingRequests);
-router.route('/requests/:requestId').put(protect, respondToRequest);
-router.route('/request/:recipientId').post(protect, sendFriendRequest);
-
+router.get('/', protect, getFriendships);
+router.get('/requests', protect, getPendingRequests);
+router.put('/requests/:requestId', protect, respondToRequest);
+router.post('/request/:recipientId', protect, sendFriendRequest);
+router.get('/sent', protect, getSentRequests); 
 export default router;

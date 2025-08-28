@@ -1,242 +1,243 @@
 import Post from '../models/Post.js';
 
-// @desc    Create a new post
-// @route   POST /api/posts
-// @access  Private
+/** POST /api/posts */
 export const createPost = async (req, res) => {
   try {
-  const { title, description, location, image, category, urgency } = req.body;
+    const { title, description, category, urgency, image, location } = req.body;
 
-
-    const postData = {
-      title,
-      description,
-      category, // Add to postData
-      urgency,
-      user: req.user._id,
-       image,
-    };
-
-    // Add location to postData if it exists
-    if (location && location.coordinates) {
-      postData.location = {
-        type: 'Point',
-        coordinates: [location.coordinates[0], location.coordinates[1]], // [longitude, latitude]
-      };
+    if (!title || !description) {
+      return res.status(400).json({ message: "Title and description are required" });
     }
 
-    const post = new Post(postData);
+    // ✅ Safe location handling
+    let loc = null;
+    if (location) {
+      if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
+        loc = { type: "Point", coordinates: location.coordinates };
+      } else if (typeof location.lat === "number" && typeof location.lng === "number") {
+        loc = { type: "Point", coordinates: [location.lng, location.lat] };
+      }
+    }
 
-    const createdPost = await post.save();
-    res.status(201).json(createdPost);
-  } catch (error) {
-    console.error(error);
-        console.error('Error in createPost:', error);
-    res.status(500).json({ message: 'Server Error' });
+    const post = new Post({
+      user: req.user._id,
+      title,
+      description,
+      category: category || "Other",
+      urgency: urgency || "Medium",
+      image: image || "", // optional
+      status: "Open",
+      location: loc,      // only attach if valid
+    });
+
+    const saved = await post.save();
+    const populated = await saved.populate([
+      { path: "user", select: "name" },
+      { path: "pledgedBy", select: "name" },
+    ]);
+
+    res.status(201).json(populated);
+  } catch (err) {
+    console.error("createPost error:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
   }
 };
 
-// @desc    Fetch all posts
-// @route   GET /api/posts
-// @access  Public
+/** GET /api/posts?search=&lat=&lng= */
 export const getPosts = async (req, res) => {
   try {
     const { search, lat, lng } = req.query;
-    const filter = {};
+    const query = {};
 
-    // 1. Text Search Logic
     if (search) {
-      // Use $regex for case-insensitive text search in title and description
-      filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-      ];
+      const regex = new RegExp(search, "i");
+      query.$or = [{ title: regex }, { description: regex }, { category: regex }];
     }
 
-    // 2. Location Filtering Logic
+    let cursor = Post.find(query);
+
     if (lat && lng) {
-      // Use MongoDB's geospatial query to find posts near a point
-      filter.location = {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)],
-          },
-          $maxDistance: 10000, // Find posts within a 10km radius
-        },
-      };
+      cursor = cursor.where("location").near({
+        center: { type: "Point", coordinates: [Number(lng), Number(lat)] },
+        maxDistance: 50000, // 50 km
+        spherical: true,
+      });
     }
 
-    const posts = await Post.find(filter) // Apply the combined filter
-      .populate('user', 'name')
-      .populate('pledgedBy', 'name')
-      .sort({ createdAt: -1 });
+    const posts = await cursor
+      .sort({ createdAt: -1 })
+      .populate("user", "name")
+      .populate("pledgedBy", "name");
 
     res.json(posts);
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+  } catch (err) {
+    console.error("getPosts error:", err);
+    res.status(500).json({ message: "Server Error" });
   }
 };
 
+/** GET /api/posts/:id */
+export const getPostById = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id)
+      .populate("user", "name")
+      .populate("pledgedBy", "name");
 
-// @desc    Pledge or unpledge to a post
-// @route   PUT /api/posts/:id/pledge
-// @access  Private
-// @desc    Pledge or unpledge to a post
-// @route   PUT /api/posts/:id/pledge
-// @access  Private
+    if (!post) return res.status(404).json({ message: "Post not found" });
+    res.json(post);
+  } catch (err) {
+    console.error("getPostById error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+/** PUT /api/posts/:id */
+export const updatePost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+    if (post.user.toString() !== req.user._id.toString()) {
+      return res.status(401).json({ message: "User not authorized" });
+    }
+
+    const { title, description, category, urgency, image, location } = req.body;
+
+    if (title !== undefined) post.title = title;
+    if (description !== undefined) post.description = description;
+    if (category !== undefined) post.category = category;
+    if (urgency !== undefined) post.urgency = urgency;
+    if (image !== undefined) post.image = image;
+
+    // ✅ update location safely
+    if (location) {
+      if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
+        post.location = { type: "Point", coordinates: location.coordinates };
+      } else if (typeof location.lat === "number" && typeof location.lng === "number") {
+        post.location = { type: "Point", coordinates: [location.lng, location.lat] };
+      }
+    }
+
+    const saved = await post.save();
+    const populated = await saved.populate([
+      { path: "user", select: "name" },
+      { path: "pledgedBy", select: "name" },
+    ]);
+    res.json(populated);
+  } catch (err) {
+    console.error("updatePost error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+/** DELETE /api/posts/:id */
+export const deletePost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+    if (post.user.toString() !== req.user._id.toString()) {
+      return res.status(401).json({ message: "User not authorized" });
+    }
+
+    await post.deleteOne();
+    res.json({ message: "Post removed" });
+  } catch (err) {
+    console.error("deletePost error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+/** PUT /api/posts/:id/vote */
+export const voteOnPost = async (req, res) => {
+  try {
+    const { voteType } = req.body;
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const uid = req.user._id.toString();
+    post.upvotes = post.upvotes.filter((id) => id.toString() !== uid);
+    post.downvotes = post.downvotes.filter((id) => id.toString() !== uid);
+
+    if (voteType === "up") post.upvotes.push(req.user._id);
+    if (voteType === "down") post.downvotes.push(req.user._id);
+
+    const saved = await post.save();
+    const populated = await saved.populate([
+      { path: "user", select: "name" },
+      { path: "pledgedBy", select: "name" },
+    ]);
+    res.json(populated);
+  } catch (err) {
+    console.error("voteOnPost error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+/** PUT /api/posts/:id/pledge (toggle) */
 export const pledgeToPost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
 
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
+    const uid = req.user._id.toString();
+    const hasPledged = post.pledgedBy.some((id) => id.toString() === uid);
 
-    const isPledged = post.pledgedBy.some(id => id.toString() === req.user._id.toString());
-
-    if (isPledged) {
-      post.pledgedBy = post.pledgedBy.filter(id => id.toString() !== req.user._id.toString());
+    if (hasPledged) {
+      post.pledgedBy = post.pledgedBy.filter((id) => id.toString() !== uid);
     } else {
       post.pledgedBy.push(req.user._id);
     }
 
-    // --- THIS IS THE FIX ---
-    // If this is an old post without a category or urgency, assign defaults before saving.
-    if (!post.category) {
-        post.category = 'Other';
-    }
-    if (!post.urgency) {
-        post.urgency = 'Medium';
-    }
-    // --- END OF FIX ---
-
-    const savedPost = await post.save();
-
-    const populatedPost = await savedPost.populate([
-        { path: 'user', select: 'name' },
-        { path: 'pledgedBy', select: 'name' }
+    const saved = await post.save();
+    const populated = await saved.populate([
+      { path: "user", select: "name" },
+      { path: "pledgedBy", select: "name" },
     ]);
-
-    res.json(populatedPost);
-  } catch (error) {
-    console.error("Pledge Error:", error);
-    res.status(500).json({ message: 'Server Error' });
+    res.json(populated);
+  } catch (err) {
+    console.error("pledgeToPost error:", err);
+    res.status(500).json({ message: "Server Error" });
   }
 };
-export const getPostById = async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.id)
-      .populate('user', 'name')
-      .populate('pledgedBy', 'name');
 
-    if (post) {
-      res.json(post);
-    } else {
-      res.status(404).json({ message: 'Post not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
-  }
-};
-// ... at the end of the file, after getPostById
-
-// @desc    Vote on a post
-// @route   PUT /api/posts/:id/vote
-// @access  Private
-export const voteOnPost = async (req, res) => {
-  try {
-    const { voteType } = req.body; // 'up' or 'down'
-    const post = await Post.findById(req.params.id);
-    const userId = req.user._id;
-
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    // Remove user from both arrays first to handle vote changes
-    post.upvotes.pull(userId);
-    post.downvotes.pull(userId);
-
-    // Add user to the correct array based on their vote
-    if (voteType === 'up') {
-      post.upvotes.push(userId);
-    } else if (voteType === 'down') {
-      post.downvotes.push(userId);
-    }
-    // If voteType is neither, it effectively removes the vote.
-
-    await post.save();
-    const updatedPost = await Post.findById(req.params.id).populate('user', 'name').populate('pledgedBy', 'name');
-    res.json(updatedPost);
-
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
-  }
-};
-export const deletePost = async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.id);
-
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    // Check if the logged-in user is the author of the post
-    if (post.user.toString() !== req.user.id) {
-      return res.status(401).json({ message: 'User not authorized' });
-    }
-
-    await post.deleteOne();
-
-    res.json({ message: 'Post removed successfully' });
-  } catch (error) {
-    console.error('Error deleting post:', error);
-    res.status(500).json({ message: 'Server Error' });
-  }
-};
-export const updatePost = async (req, res) => {
-  try {
-    const post = await Post.findById(req.params.id);
-
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    if (post.user.toString() !== req.user.id) {
-      return res.status(401).json({ message: 'User not authorized' });
-    }
-
-    // Update fields from request body
-    post.title = req.body.title || post.title;
-    post.description = req.body.description || post.description;
-    post.image = req.body.image; // Allow image to be updated (can be an empty string to remove it)
-    post.category = req.body.category || post.category; // Add category
-    post.urgency = req.body.urgency || post.urgency;   // Add urgency
-    
-    const updatedPost = await post.save();
-    res.json(updatedPost);
-  } catch (error) {
-    console.error('Error updating post:', error);
-    res.status(500).json({ message: 'Server Error' });
-  }
-};
-// @access  Private
+/** PUT /api/posts/:id/status */
 export const updatePostStatus = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-    if (!post) return res.status(404).json({ message: 'Post not found' });
-    if (post.user.toString() !== req.user.id) return res.status(401).json({ message: 'User not authorized' });
+    if (!post) return res.status(404).json({ message: "Post not found" });
+    if (post.user.toString() !== req.user._id.toString()) {
+      return res.status(401).json({ message: "User not authorized" });
+    }
 
-    post.status = req.body.status || post.status; // e.g., "Resolved"
-    await post.save();
+    post.status = req.body.status || post.status;
 
-    const populatedPost = await post.populate([
-        { path: 'user', select: 'name' },
-        { path: 'pledgedBy', select: 'name' }
+    const saved = await post.save();
+    const populated = await saved.populate([
+      { path: "user", select: "name" },
+      { path: "pledgedBy", select: "name" },
     ]);
-    res.json(populatedPost);
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+    res.json(populated);
+  } catch (err) {
+    console.error("updatePostStatus error:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
+};
+
+/** POST /api/posts/:id/view */
+export const addView = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const uid = req.user._id.toString();
+    if (!post.views.some((id) => id.toString() === uid)) {
+      post.views.push(req.user._id);
+      post.viewCount = post.views.length;
+      await post.save();
+    }
+
+    res.json({ viewCount: post.viewCount });
+  } catch (err) {
+    console.error("addView error:", err);
+    res.status(500).json({ message: "Server Error" });
   }
 };

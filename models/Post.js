@@ -1,76 +1,43 @@
+// models/Post.js
 import mongoose from 'mongoose';
 
-const postSchema = new mongoose.Schema({
-  // Link the post to the user who created it
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: true,
-    ref: 'User', // This creates a relationship with the User model
-  },
-  title: {
-    type: String,
-    required: true,
-  },
-  category: {
-  type: String,
-  required: true,
-  enum: ['Home & Repair', 'Tutoring & Learning', 'Tech Support', 'Errands & Shopping', 'Health & Wellness', 'Other'],
-},
-urgency: {
-  type: String,
-  required: true,
-  enum: ['Low', 'Medium', 'High'],
-  default: 'Medium',
-},
-  description: {
-    type: String,
-    required: true,
-  },
-  // ... inside postSchema
-  // ... inside postSchema
-// ... after description field
-image: {
-  type: String, // We'll store the image URL here
-},
-location: {
+const postSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    category: { type: String, default: 'General' },
+    urgency: { type: String, enum: ['Low', 'Medium', 'High'], default: 'Low' },
+    image: { type: String },
+
+    status: { type: String, enum: ['Open', 'Resolved'], default: 'Open' },
+
+    // votes / pledges
+    upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    downvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    pledgedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+    // analytics
+    commentCount: { type: Number, default: 0 },
+    views: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    viewCount: { type: Number, default: 0 },
+
+    // geo (optional)
+    location: {
   type: {
     type: String,
-    enum: ['Point'], // 'location.type' must be 'Point'
+    enum: ['Point'],
+    default: 'Point'
   },
   coordinates: {
-    type: [Number], // Array of numbers for [longitude, latitude]
-  },
+    type: [Number], // [longitude, latitude]
+    default: undefined
+  }
 },
-
-pledgedBy: [{
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'User',
-}],
-upvotes: [{
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'User',
-}],
-downvotes: [{
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'User',
-}],
-status: {
-// ... rest of the schema
-    type: String,
-    required: true,
-    enum: ['Open', 'In Progress', 'Resolved'], // The status can only be one of these values
-    default: 'Open',
   },
-  // We will add image and location functionality later
-}, {
-  timestamps: true,
-});
-// ... after const postSchema = new mongoose.Schema({ ... });
+  { timestamps: true }
+);
 
-postSchema.index({ location: '2dsphere' }); // Create a geospatial index
+postSchema.index({ location: '2dsphere' });
 
-// ...
-
-const Post = mongoose.model('Post', postSchema);
-
-export default Post;
+export default mongoose.model('Post', postSchema);

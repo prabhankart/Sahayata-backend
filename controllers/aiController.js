@@ -1,31 +1,37 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Initialize the Google AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const cleanTitle = (t) =>
+  String(t || '')
+    .replace(/["'“”]/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(' ');
 
-// @desc    Suggest a title for a post
-// @route   POST /api/ai/suggest-title
-// @access  Private
 export const suggestTitle = async (req, res) => {
   const { description } = req.body;
-
   if (!description || description.trim().length < 10) {
     return res.status(400).json({ message: 'Description is too short.' });
   }
 
+  // Fallback: trim to <= 8 words
+  const fallback = cleanTitle(description);
+
   try {
-    // Use the Gemini model
+    if (!process.env.GEMINI_API_KEY) return res.json({ title: fallback });
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    const prompt = `Summarize the following help request into a concise title of 8 words or less. Do not add any extra text or quotation marks around the title. Here is the request: "${description}"`;
+    const prompt = `Summarize into a concise, useful title (<=8 words). No quotes.\n${description}`;
 
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const title = response.text().trim();
+    const p = model.generateContent(prompt);
+    const timeout = new Promise((_, r) => setTimeout(() => r(new Error('AI timeout')), 5000));
+    const result = await Promise.race([p, timeout]);
+    const title = cleanTitle(result.response.text().trim()) || fallback;
 
     res.json({ title });
-  } catch (error) {
-    console.error('Google Gemini API error:', error);
-    res.status(500).json({ message: 'Failed to generate title from AI' });
+  } catch {
+    res.json({ title: fallback });
   }
 };

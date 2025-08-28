@@ -89,45 +89,42 @@ export const listGroupMessages = async (req, res) => {
   try {
     const msgs = await GroupMessage.find({ group: req.params.groupId })
       .sort({ createdAt: 1 })
-      .limit(200)
-     .populate("sender", "name avatar")
-
+      .limit(300)
+      .populate('sender', 'name avatar')
       .lean();
     res.json(msgs);
-  } catch {
-    res.status(500).json({ message: "Server Error" });
+  } catch (e) {
+    res.status(500).json({ message: 'Server Error' });
   }
 };
 
 export const createGroupMessage = async (req, res) => {
   try {
-    const { text } = req.body;
-    if (!text?.trim()) return res.status(400).json({ message: "Text is required" });
+    const { text, clientId } = req.body;
+    if (!text?.trim()) return res.status(400).json({ message: 'Text is required' });
 
-    // ensure member
     const group = await Group.findById(req.params.groupId).lean();
-    if (!group) return res.status(404).json({ message: "Group not found" });
+    if (!group) return res.status(404).json({ message: 'Group not found' });
+
     const isMember = (group.members || []).some(
       (id) => id.toString() === req.user._id.toString()
     );
-    if (!isMember) return res.status(403).json({ message: "Join group to chat" });
+    if (!isMember) return res.status(403).json({ message: 'Join group to chat' });
 
     const msg = await GroupMessage.create({
-  group: req.params.groupId,
-  sender: req.user._id,
-  text: text.trim(),
-});
+      group: req.params.groupId,
+      sender: req.user._id,
+      text: text.trim(),
+      clientId: clientId || undefined,
+    });
 
+    const populated = await msg.populate({ path: 'sender', select: 'name avatar' });
 
- const populated = await msg.populate({ path: "sender", select: "name avatar" });
-
-
-    // broadcast to room
-    const io = req.app.get("io");
-    if (io) io.to(`group:${req.params.groupId}`).emit("group:message", populated);
+    const io = req.app.get('io');
+    if (io) io.to(`group:${req.params.groupId}`).emit('group:message', populated);
 
     res.status(201).json(populated);
-  } catch {
-    res.status(500).json({ message: "Server Error" });
+  } catch (e) {
+    res.status(500).json({ message: 'Server Error' });
   }
 };

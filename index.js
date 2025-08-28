@@ -34,7 +34,7 @@ import uploadRoutes from './routes/uploadRoutes.js';
 import groupRoutes from './routes/groupRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import commentRoutes from './routes/commentRoutes.js';
-
+import ensureTopicGroups from './utils/seedGroups.js';
 // Error middleware
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
@@ -191,6 +191,8 @@ io.on('connection', (socket) => {
 // ---------- Start ----------
 const startServer = async () => {
   await connectDB();
+  await ensureTopicGroups(); // ✅ seeds when groups collection is empty
   server.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));
 };
+
 startServer();

@@ -9,25 +9,17 @@ export const createPost = async (req, res) => {
       return res.status(400).json({ message: "Title and description are required" });
     }
 
+    // ✅ handle image safely
+    const imageUrl = req.body.image || (req.file ? req.file.path : "");
+
     // ✅ Safe location handling
     let loc = null;
     if (location) {
-      try {
-        const parsed = typeof location === "string" ? JSON.parse(location) : location;
-        if (Array.isArray(parsed.coordinates) && parsed.coordinates.length === 2) {
-          loc = { type: "Point", coordinates: parsed.coordinates };
-        } else if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
-          loc = { type: "Point", coordinates: [parsed.lng, parsed.lat] };
-        }
-      } catch (e) {
-        console.warn("Invalid location format");
+      if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
+        loc = { type: "Point", coordinates: location.coordinates };
+      } else if (typeof location.lat === "number" && typeof location.lng === "number") {
+        loc = { type: "Point", coordinates: [location.lng, location.lat] };
       }
-    }
-
-    // ✅ Handle image uploaded via Cloudinary
-    let imageUrl = "";
-    if (req.file && req.file.path) {
-      imageUrl = req.file.path; // Cloudinary gives full https://... URL
     }
 
     const post = new Post({
@@ -36,7 +28,7 @@ export const createPost = async (req, res) => {
       description,
       category: category || "Other",
       urgency: urgency || "Medium",
-      image: imageUrl,
+      image: imageUrl,  // ✅ now always defined
       status: "Open",
       location: loc,
     });

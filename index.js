@@ -14,10 +14,14 @@ import morgan from 'morgan';
 import xssInPlace from './middleware/xssInPlace.js';
 import safeSanitize from './middleware/safeSanitize.js';
 import cookieParser from 'cookie-parser';
-import path from "path";
+import path from 'path';
+
 // Models used by sockets
 import User from './models/User.js';
 import Message from './models/Message.js';
+// ✨ NEW: for group socket send (optional)
+import GroupMessage from './models/GroupMessage.js';
+import Group from './models/Group.js';
 
 // Passport config
 import configurePassport from './config/passport.js';
@@ -35,6 +39,7 @@ import groupRoutes from './routes/groupRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import commentRoutes from './routes/commentRoutes.js';
 import ensureTopicGroups from './utils/seedGroups.js';
+
 // Error middleware
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
 
@@ -63,13 +68,8 @@ const envOrigins = (process.env.CLIENT_ORIGINS || process.env.CLIENT_ORIGIN || '
   .filter(Boolean);
 
 // Default dev + prod origins
-const devOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-];
-const prodOrigins = [
-  'https://sahayata-frontend.vercel.app',   // ✅ Vercel frontend
-];
+const devOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const prodOrigins = ['https://sahayata-frontend.vercel.app']; // ✅ Vercel frontend
 
 const allowList = Array.from(new Set([...devOrigins, ...prodOrigins, ...envOrigins]));
 
@@ -91,7 +91,7 @@ app.use(cookieParser());
 app.use(xssInPlace);
 app.use(compression());
 app.use(morgan('tiny'));
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.use(
   session({
@@ -139,7 +139,7 @@ app.set('io', io);
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
 
-  // Post/project chat
+  // ----- Post/project chat -----
   socket.on('joinRoom', ({ postId }) => {
     if (postId) socket.join(postId);
   });
@@ -158,7 +158,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Private chat
+  // ----- Private chat -----
   socket.on('joinConversation', ({ conversationId }) => {
     if (conversationId) socket.join(conversationId);
   });
@@ -177,12 +177,39 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Group chat
+  // ----- Group chat -----
   socket.on('group:join', (groupId) => {
     if (groupId) socket.join(`group:${groupId}`);
   });
+
   socket.on('group:leave', (groupId) => {
     if (groupId) socket.leave(`group:${groupId}`);
+  });
+
+  // ✨ NEW: typing relay (used by GroupPage UI)
+  socket.on('group:typing', ({ groupId, userId, name }) => {
+    if (!groupId) return;
+    socket.to(`group:${groupId}`).emit('group:typing', { userId, name });
+  });
+
+  /* OPTIONAL: socket-based sending (UI can stay on HTTP; keep this if you might switch later) */
+  socket.on('group:send', async ({ groupId, senderId, text, clientId }, ack) => {
+    try {
+      if (!groupId || !senderId || !text?.trim()) return ack?.({ ok: false });
+      const msg = await GroupMessage.create({
+        group: groupId,
+        sender: senderId,
+        text: text.trim(),
+        clientId: clientId || undefined,
+      });
+      await Group.findByIdAndUpdate(groupId, { $set: { lastMessageAt: new Date() } });
+      const populated = await msg.populate([{ path: 'sender', select: 'name avatar' }]);
+      io.to(`group:${groupId}`).emit('group:message', populated);
+      ack?.({ ok: true, message: populated });
+    } catch (e) {
+      console.error('group:send error', e);
+      ack?.({ ok: false });
+    }
   });
 
   socket.on('disconnect', () => console.log('Socket disconnected:', socket.id));

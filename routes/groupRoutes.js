@@ -1,12 +1,16 @@
-// routes/groupRoutes.js
 import express from "express";
 import {
-  createGroup, listGroups, getGroup,
-  joinGroup, leaveGroup,
-  listGroupMessages, createGroupMessage,
-  getRecommendedGroups,         // new
-  pledgeHelp, unpledgeHelp,     // new
-  updateGroupMeta,              // new
+  createGroup,
+  listGroups,
+  getGroup,
+  joinGroup,
+  leaveGroup,
+  listGroupMessages,
+  createGroupMessage,
+  getRecommendedGroups,
+  pledgeHelp,
+  unpledgeHelp,
+  updateGroupMeta,
 } from "../controllers/groupController.js";
 import { protect } from "../middleware/authMiddleware.js";
 

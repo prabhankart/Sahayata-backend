@@ -1,210 +1,239 @@
-// controllers/groupController.js
 import mongoose from "mongoose";
 import Group from "../models/Group.js";
 import GroupMessage from "../models/GroupMessage.js";
+import User from "../models/User.js";
 
-/* ------- Recommended defaults (created once) ------- */
-const SYSTEM_USER_ID = new mongoose.Types.ObjectId("000000000000000000000001");
-const DEFAULT_GROUPS = [
-  { name: "Environment Protection", category: "Environment", description: "Cleanups, trees, recycling." },
-  { name: "Tech & Digital Help", category: "Technology", description: "Phones, laptops, internet, basics." },
-  { name: "Local Mutual Aid", category: "Community", description: "Groceries, transport, emergencies." },
-  { name: "Education & Tutoring", category: "Education", description: "Tutors, study groups, resources." },
-  { name: "Health & Wellness", category: "Health", description: "Check-ins, walks, first-aid basics." },
-];
-async function ensureDefaultGroups() {
-  for (const g of DEFAULT_GROUPS) {
-    await Group.findOneAndUpdate(
-      { name: g.name },
-      { $setOnInsert: { ...g, createdBy: SYSTEM_USER_ID, members: [] } },
-      { upsert: true, new: true }
-    );
+const STATUSES = ["Open", "In Progress", "Resolved", "On Hold"];
+
+/* ----------------------------- Groups (CRUD) ----------------------------- */
+export async function createGroup(req, res) {
+  try {
+    const { name, description = "", category = "" } = req.body;
+    if (!name?.trim()) return res.status(400).json({ message: "Group name is required." });
+
+    const g = await Group.create({
+      name: name.trim(),
+      description: description.trim(),
+      category: category.trim(),
+      status: "Open",
+      members: [req.user._id],
+      pledgedHelpers: [],
+    });
+
+    res.status(201).json(g);
+  } catch (e) {
+    console.error("createGroup", e);
+    res.status(500).json({ message: "Failed to create group." });
   }
 }
-export const getRecommendedGroups = async (_req, res) => {
-  try { await ensureDefaultGroups(); const data = await Group.find({ name: { $in: DEFAULT_GROUPS.map(d=>d.name) } }); res.json(data); }
-  catch { res.status(500).json({ message: "Server Error" }); }
-}
-/* --------------------------------------------------- */
 
-export const createGroup = async (req, res) => {
+export async function listGroups(req, res) {
   try {
-    const { name, description = "", category = "General", problemTitle = "" } = req.body;
-    if (!name?.trim()) return res.status(400).json({ message: "Name is required" });
-
-    const group = await Group.create({
-      name: name.trim(),
-      description,
-      category,
-      problemTitle,
-      createdBy: req.user._id,
-      members: [req.user._id],
-    });
-
-    res.status(201).json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
-
-export const listGroups = async (req, res) => {
-  try {
-    await ensureDefaultGroups();
-    const { q = "", category, onlyJoined } = req.query;
-    const me = req.user?._id;
+    const { q, onlyJoined, category } = req.query;
     const filter = {};
-    if (q) filter.$text = { $search: q };
+
+    if (q?.trim()) {
+      const rx = new RegExp(q.trim(), "i");
+      filter.$or = [{ name: rx }, { description: rx }, { category: rx }];
+    }
     if (category && category !== "All") filter.category = category;
-    if (onlyJoined === "true" && me) filter.members = me;
 
-    const groups = await Group.find(filter).sort({ updatedAt: -1 }).limit(100).lean();
-    res.json(groups);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
+    if (String(onlyJoined) === "true") {
+      filter.members = { $in: [req.user._id] };
+    }
 
-export const getGroup = async (req, res) => {
+    const docs = await Group.find(filter).sort({ updatedAt: -1, createdAt: -1 }).limit(100).lean();
+    res.json(docs);
+  } catch (e) {
+    console.error("listGroups", e);
+    res.status(500).json({ message: "Failed to load groups." });
+  }
+}
+
+export async function getGroup(req, res) {
   try {
-    const group = await Group.findById(req.params.groupId)
-      .populate("createdBy", "name")
-      .populate("members", "name")
-      .populate("pledgedHelpers", "name");
-    if (!group) return res.status(404).json({ message: "Group not found" });
-    res.json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
+    const g = await Group.findById(req.params.groupId).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("getGroup", e);
+    res.status(500).json({ message: "Failed to load group." });
+  }
+}
 
-export const joinGroup = async (req, res) => {
+export async function joinGroup(req, res) {
   try {
-    const me = req.user._id;
-    const group = await Group.findByIdAndUpdate(
+    const g = await Group.findByIdAndUpdate(
       req.params.groupId,
-      { $addToSet: { members: me } },
+      { $addToSet: { members: req.user._id } },
       { new: true }
-    );
-    if (!group) return res.status(404).json({ message: "Group not found" });
-    res.json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
+    ).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("joinGroup", e);
+    res.status(500).json({ message: "Could not join group." });
+  }
+}
 
-export const leaveGroup = async (req, res) => {
+export async function leaveGroup(req, res) {
   try {
-    const me = req.user._id;
-    const group = await Group.findByIdAndUpdate(
+    const g = await Group.findByIdAndUpdate(
       req.params.groupId,
-      { $pull: { members: me, pledgedHelpers: me } },
+      { $pull: { members: req.user._id } },
       { new: true }
-    );
-    if (!group) return res.status(404).json({ message: "Group not found" });
-    res.json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
+    ).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("leaveGroup", e);
+    res.status(500).json({ message: "Could not leave group." });
+  }
+}
 
-/* ------- ✨ New: pledge/unpledge helpers ------- */
-export const pledgeHelp = async (req, res) => {
+export async function getRecommendedGroups(req, res) {
   try {
-    const me = req.user._id;
-    const group = await Group.findByIdAndUpdate(
+    // naive "recommended": top by members count / recent
+    const docs = await Group.aggregate([
+      { $addFields: { membersCount: { $size: { $ifNull: ["$members", []] } } } },
+      { $sort: { membersCount: -1, updatedAt: -1 } },
+      { $limit: 6 },
+    ]);
+    res.json(docs);
+  } catch (e) {
+    console.error("getRecommendedGroups", e);
+    res.status(500).json({ message: "Failed to load recommendations." });
+  }
+}
+
+export async function pledgeHelp(req, res) {
+  try {
+    const g = await Group.findByIdAndUpdate(
       req.params.groupId,
-      { $addToSet: { pledgedHelpers: me }, $addToSet: { members: me } }, // auto-join on pledge
+      { $addToSet: { pledgedHelpers: req.user._id } },
       { new: true }
-    ).populate("pledgedHelpers", "name");
-    if (!group) return res.status(404).json({ message: "Group not found" });
+    ).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("pledgeHelp", e);
+    res.status(500).json({ message: "Failed to pledge." });
+  }
+}
 
-    // push live update
-    const io = req.app.get("io");
-    if (io) io.to(`group:${req.params.groupId}`).emit("group:update", { pledgedHelpers: group.pledgedHelpers });
-
-    res.json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
-
-export const unpledgeHelp = async (req, res) => {
+export async function unpledgeHelp(req, res) {
   try {
-    const me = req.user._id;
-    const group = await Group.findByIdAndUpdate(
+    const g = await Group.findByIdAndUpdate(
       req.params.groupId,
-      { $pull: { pledgedHelpers: me } },
+      { $pull: { pledgedHelpers: req.user._id } },
       { new: true }
-    ).populate("pledgedHelpers", "name");
-    if (!group) return res.status(404).json({ message: "Group not found" });
+    ).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("unpledgeHelp", e);
+    res.status(500).json({ message: "Failed to unpledge." });
+  }
+}
 
-    const io = req.app.get("io");
-    if (io) io.to(`group:${req.params.groupId}`).emit("group:update", { pledgedHelpers: group.pledgedHelpers });
-
-    res.json(group);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
-
-/* ------- ✨ New: update group meta (status/problemTitle) ------- */
-export const updateGroupMeta = async (req, res) => {
+export async function updateGroupMeta(req, res) {
   try {
-    const me = req.user._id;
-    const { status, problemTitle, description } = req.body;
+    const { status } = req.body;
+    if (status && !STATUSES.includes(status)) {
+      return res.status(400).json({ message: "Invalid status." });
+    }
+    const patch = {};
+    if (status) patch.status = status;
 
-    const group = await Group.findById(req.params.groupId);
-    if (!group) return res.status(404).json({ message: "Group not found" });
+    const g = await Group.findByIdAndUpdate(req.params.groupId, { $set: patch }, { new: true }).lean();
+    if (!g) return res.status(404).json({ message: "Group not found." });
+    res.json(g);
+  } catch (e) {
+    console.error("updateGroupMeta", e);
+    res.status(500).json({ message: "Failed to update group." });
+  }
+}
 
-    // allow any member to update status/title/desc (tweak as needed)
-    const isMember = (group.members || []).some((id) => id.toString() === me.toString());
-    if (!isMember) return res.status(403).json({ message: "Join group to update" });
-
-    if (status) group.status = status;
-    if (problemTitle !== undefined) group.problemTitle = problemTitle;
-    if (description !== undefined) group.description = description;
-    await group.save();
-
-    const populated = await Group.findById(group._id)
-      .populate("createdBy", "name")
-      .populate("members", "name")
-      .populate("pledgedHelpers", "name");
-
-    const io = req.app.get("io");
-    if (io) io.to(`group:${req.params.groupId}`).emit("group:update", {
-      status: populated.status,
-      problemTitle: populated.problemTitle,
-      description: populated.description,
-    });
-
-    res.json(populated);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
-
-/* -------- Group Messages -------- */
-export const listGroupMessages = async (req, res) => {
+/* --------------------------- Group Messages (HTTP) --------------------------- */
+export async function listGroupMessages(req, res) {
   try {
-    const msgs = await GroupMessage.find({ group: req.params.groupId })
+    const { groupId } = req.params;
+
+    const docs = await GroupMessage.find({ group: groupId })
       .sort({ createdAt: 1 })
-      .limit(300)
-      .populate("sender", "name avatar")
-      .populate("replyTo", "text sender")
+      .populate({ path: "sender", select: "name avatar" })
+      .populate({
+        path: "replyTo",
+        select: "text sender",
+        populate: { path: "sender", select: "name avatar" },
+      })
       .lean();
-    res.json(msgs);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
 
-export const createGroupMessage = async (req, res) => {
+    const shaped = docs.map((m) => ({
+      ...m,
+      sender: m.sender ? { _id: m.sender._id, name: m.sender.name } : undefined,
+      replyTo: m.replyTo
+        ? {
+            _id: m.replyTo._id,
+            text: m.replyTo.text,
+            sender: m.replyTo.sender
+              ? { _id: m.replyTo.sender._id, name: m.replyTo.sender.name }
+              : undefined,
+          }
+        : null,
+    }));
+
+    res.json(shaped);
+  } catch (e) {
+    console.error("listGroupMessages", e);
+    res.status(500).json({ message: "Failed to load chat history." });
+  }
+}
+
+export async function createGroupMessage(req, res) {
   try {
-    const { text, clientId, replyTo } = req.body;
-    if (!text?.trim()) return res.status(400).json({ message: "Text is required" });
-
-    const group = await Group.findById(req.params.groupId).lean();
-    if (!group) return res.status(404).json({ message: "Group not found" });
-
-    const isMember = (group.members || []).some((id) => id.toString() === req.user._id.toString());
-    if (!isMember) return res.status(403).json({ message: "Join group to chat" });
+    const { groupId } = req.params;
+    const { text = "", attachments = [], replyTo = null, clientId = null } = req.body;
 
     const msg = await GroupMessage.create({
-      group: req.params.groupId,
+      group: groupId,
       sender: req.user._id,
-      text: text.trim(),
-      clientId: clientId || undefined,
-      replyTo: replyTo || null,
+      text,
+      attachments,
+      replyTo,
+      clientId,
     });
 
-    await Group.findByIdAndUpdate(req.params.groupId, { $set: { lastMessageAt: new Date() } });
-    const populated = await msg.populate([{ path: "sender", select: "name avatar" }, { path: "replyTo", select: "text sender" }]);
+    await msg.populate([
+      { path: "sender", select: "name avatar" },
+      {
+        path: "replyTo",
+        select: "text sender",
+        populate: { path: "sender", select: "name avatar" },
+      },
+    ]);
 
+    const payload = {
+      ...msg.toObject(),
+      sender: { _id: msg.sender._id, name: msg.sender.name },
+      replyTo: msg.replyTo
+        ? {
+            _id: msg.replyTo._id,
+            text: msg.replyTo.text,
+            sender: msg.replyTo.sender
+              ? { _id: msg.replyTo.sender._id, name: msg.replyTo.sender.name }
+              : undefined,
+          }
+        : null,
+    };
+
+    // broadcast to socket room used by the UI: group:${groupId}
     const io = req.app.get("io");
-    if (io) io.to(`group:${req.params.groupId}`).emit("group:message", populated);
+    if (io) io.to(`group:${groupId}`).emit("group:message", payload);
 
-    res.status(201).json(populated);
-  } catch { res.status(500).json({ message: "Server Error" }); }
-};
+    res.json(payload);
+  } catch (e) {
+    console.error("createGroupMessage", e);
+    res.status(500).json({ message: "Failed to send message." });
+  }
+}

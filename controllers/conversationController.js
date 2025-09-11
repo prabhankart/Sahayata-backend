@@ -33,15 +33,21 @@ export const startOrGetConversation = async (req, res) => {
 
 export const getConversationMessages = async (req, res) => {
   try {
+    const me = req.user._id;
     const p = Math.max(1, parseInt(req.query.page, 10) || 1);
     const l = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const skip = (p - 1) * l;
 
-    const docs = await Message.find({ conversation: req.params.conversationId })
+    let docs = await Message.find({ conversation: req.params.conversationId })
       .populate('sender', 'name avatar')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(l);
+
+    // filter / mask
+    docs = docs
+      .filter(m => !m.deletedFor.includes(me))
+      .map(m => m.deletedForEveryone ? { ...m.toObject(), text: '🚫 Message deleted', attachments: [] } : m);
 
     res.json({ data: docs.reverse(), page: p });
   } catch {

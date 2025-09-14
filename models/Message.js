@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
+import Conversation from "./Conversation.js"; // used to bump updatedAt after saves
 
 const reactionSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    user:  { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     emoji: { type: String, required: true },
   },
   { _id: false }
@@ -10,7 +11,6 @@ const reactionSchema = new mongoose.Schema(
 
 const attachmentSchema = new mongoose.Schema(
   {
-    // For image/video/audio/file or linked post preview
     url: String,
     type: {
       type: String,
@@ -21,15 +21,13 @@ const attachmentSchema = new mongoose.Schema(
     name: String,
     mime: String,
     size: Number,
-
-    // For type === "post" (optional rich preview)
     postRef: {
-      _id: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
-      title: String,
-      status: String,
+      _id:        { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
+      title:      String,
+      status:     String,
       authorName: String,
-      coverUrl: String,
-      slug: String,
+      coverUrl:   String,
+      slug:       String,
     },
   },
   { _id: false }
@@ -37,8 +35,7 @@ const attachmentSchema = new mongoose.Schema(
 
 const messageSchema = new mongoose.Schema(
   {
-    // Either a project/post room or a private DM
-    post: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
+    post:         { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
     conversation: { type: mongoose.Schema.Types.ObjectId, ref: "Conversation" },
 
     sender: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -52,8 +49,11 @@ const messageSchema = new mongoose.Schema(
     edited: { type: Boolean, default: false },
 
     // delete tracking
-    deletedFor: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], // “delete for me”
-    deletedForEveryone: { type: Boolean, default: false },              // “delete for everyone”
+    deletedFor:         { type: [mongoose.Schema.Types.ObjectId], ref: "User", default: [] },
+    deletedForEveryone: { type: Boolean, default: false },
+
+    // NEW: read tracking for unread badges
+    readBy: { type: [mongoose.Schema.Types.ObjectId], ref: "User", default: [], index: true },
   },
   { timestamps: true }
 );
@@ -66,7 +66,35 @@ messageSchema.pre("validate", function (next) {
   next();
 });
 
+// NEW: on create, mark the sender as having read the message
+messageSchema.pre("save", function (next) {
+  if (this.isNew && this.sender) {
+    const sid = this.sender.toString();
+    if (!this.readBy.some(id => String(id) === sid)) {
+      this.readBy.push(this.sender);
+    }
+  }
+  next();
+});
+
+// NEW: after save, bump the conversation's updatedAt so list sorts correctly
+messageSchema.post("save", async function (doc) {
+  try {
+    if (doc.conversation) {
+      await Conversation.updateOne(
+        { _id: doc.conversation },
+        { $set: { updatedAt: new Date() } }
+      );
+    }
+  } catch (e) {
+    // don't throw from post hook
+  }
+});
+
+// Indexes for fast unread queries
 messageSchema.index({ post: 1, createdAt: -1 });
 messageSchema.index({ conversation: 1, createdAt: -1 });
+messageSchema.index({ conversation: 1, readBy: 1 }); // unread calc
+messageSchema.index({ conversation: 1, sender: 1 }); // unread calc
 
 export default mongoose.model("Message", messageSchema);

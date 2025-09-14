@@ -195,6 +195,30 @@ io.on("connection", (socket) => {
       console.error("sendPrivateMessage error", e);
     }
   });
+// server.js (inside io.on("connection", (socket) => { ... }))
+
+socket.on("conversation:markRead", async ({ conversationId, userId }) => {
+  try {
+    if (!conversationId || !userId) return;
+    await Message.updateMany(
+      {
+        conversation: new mongoose.Types.ObjectId(conversationId),
+        sender: { $ne: new mongoose.Types.ObjectId(userId) },
+        readBy: { $nin: [new mongoose.Types.ObjectId(userId)] },
+        deletedForEveryone: { $ne: true },
+        deletedFor: { $nin: [new mongoose.Types.ObjectId(userId)] },
+      },
+      { $addToSet: { readBy: new mongoose.Types.ObjectId(userId) } }
+    );
+
+    io.to(String(conversationId)).emit("messagesRead", {
+      conversationId: String(conversationId),
+      readerId: String(userId),
+    });
+  } catch (e) {
+    console.error("conversation:markRead error", e);
+  }
+});
 
   /* ------------------------------ Group chat ----------------------------- */
   socket.on("group:join", (groupId) => {

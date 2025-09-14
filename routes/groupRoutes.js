@@ -1,6 +1,6 @@
 // routes/groupRoutes.js
 import express from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import {
   createGroup,
   listGroups,
@@ -13,54 +13,33 @@ import {
   pledgeHelp,
   unpledgeHelp,
   updateGroupMeta,
-  markGroupRead,         // STAGE0
-  getGroupUnread,        // STAGE0
+  markGroupRead,   // STAGE0
+  getGroupUnread,  // STAGE0
 } from "../controllers/groupController.js";
 import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-/* --------------------------- STAGE 0: Rate caps --------------------------- */
-/** Build a limiter with consistent key + friendly JSON handler */
-function makeMsgLimiter({ windowMs, max }) {
-  return rateLimit({
+/* -------------------- STAGE0 (Rate caps, IPv6 safe) -------------------- */
+const makeMsgLimiter = (max, windowMs) =>
+  rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    // Don’t count 4xx/5xx failures—mostly useful during development or validation errors.
-    skipFailedRequests: true,
-    keyGenerator: (req) => {
-      const uid = req.user?._id?.toString();
-      const gid = req.params.groupId || "nogroup";
-      // fall back to IP if somehow no user (shouldn’t happen since protect runs first)
-      const ip = req.ip || "noip";
-      return uid ? `g:${gid}:u:${uid}` : `g:${gid}:ip:${ip}`;
-    },
-    handler: (req, res /*, next, options*/) => {
-      // express-rate-limit v6 exposes req.rateLimit info
-      const retryAfter =
-        (req.rateLimit?.resetTime &&
-          Math.max(0, Math.ceil((req.rateLimit.resetTime - Date.now()) / 1000))) ||
-        res.getHeader("Retry-After") ||
-        undefined;
-
-      return res.status(429).json({
-        message: "You’re sending messages too fast. Please wait a moment and try again.",
-        retryAfter, // seconds (if available)
-        windowMs,
-        limit: max,
-      });
+    keyGenerator: (req, res) => {
+      // ✅ normalize IP + user + group
+      return (
+        ipKeyGenerator(req, res) +
+        `:g:${req.params.groupId || "no-group"}:u:${req.user?._id?.toString() || "anon"}`
+      );
     },
   });
-}
 
-// 1 msg/sec per user per group
-const burstLimiter = makeMsgLimiter({ windowMs: 1 * 1000, max: 1 });
-// 30 msgs/min per user per group
-const minuteLimiter = makeMsgLimiter({ windowMs: 60 * 1000, max: 30 });
+const burstLimiter = makeMsgLimiter(1, 1 * 1000);     // 1 per sec per user per group
+const minuteLimiter = makeMsgLimiter(30, 60 * 1000);  // 30 per min per user per group
 
-/* --------------------------------- Routes -------------------------------- */
+/* --------------------------- Group routes --------------------------- */
 router.get("/", protect, listGroups);
 router.get("/recommended", protect, getRecommendedGroups);
 router.post("/", protect, createGroup);
@@ -73,6 +52,7 @@ router.post("/:groupId/pledge", protect, pledgeHelp);
 router.post("/:groupId/unpledge", protect, unpledgeHelp);
 router.patch("/:groupId/meta", protect, updateGroupMeta);
 
+/* --------------------------- Messages --------------------------- */
 // STAGE0 (Ordering + Pagination)
 router.get("/:groupId/messages", protect, listGroupMessages);
 
@@ -85,7 +65,8 @@ router.post(
   createGroupMessage
 );
 
-// STAGE0 (Read state)
+/* --------------------------- Read state --------------------------- */
+// STAGE0 (Read tracking)
 router.post("/:groupId/read", protect, markGroupRead);
 router.get("/:groupId/unread", protect, getGroupUnread);
 

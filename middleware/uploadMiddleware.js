@@ -1,41 +1,26 @@
+// middleware/uploadMiddleware.js
 import multer from "multer";
-import path from "path";
-import fs from "fs";
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 
-// make sure uploads folder exists
-const uploadDir = path.resolve("uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-// configure storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/"); // save inside /uploads folder
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname)); // eg: 1693443233-123.png
+// Cloudinary storage (handles images, video, audio, pdf)
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "sahayata-uploads",
+    resource_type: "auto",
+    // keep this open since chat can send many types
+    allowed_formats: ["jpg", "jpeg", "png", "gif", "mp4", "mov", "avi", "mp3", "wav", "pdf"],
   },
 });
 
-// file filter (only images)
-function fileFilter(req, file, cb) {
-  const allowed = /jpeg|jpg|png|gif/;
-  const extname = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowed.test(file.mimetype);
-
-  if (extname && mimetype) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files are allowed!"));
-  }
-}
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // max 5 MB
-});
+// (Optional) light filter — most types are allowed already
+const upload = multer({ storage });
 
 export default upload;

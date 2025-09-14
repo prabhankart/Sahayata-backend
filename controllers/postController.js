@@ -1,4 +1,5 @@
-import Post from '../models/Post.js';
+// controllers/postController.js
+import Post from "../models/Post.js";
 
 /** POST /api/posts */
 export const createPost = async (req, res) => {
@@ -9,10 +10,11 @@ export const createPost = async (req, res) => {
       return res.status(400).json({ message: "Title and description are required" });
     }
 
-    // ✅ handle image safely
-    const imageUrl = req.body.image || (req.file ? req.file.path : "");
+    // With Cloudinary storage, the hosted URL is on req.file.path (or secure_url)
+    const uploadedUrl = req.file ? (req.file.path || req.file.secure_url) : "";
+    const imageUrl = req.body.image || uploadedUrl;
 
-    // ✅ Safe location handling
+    // Safe location handling
     let loc = null;
     if (location) {
       if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
@@ -28,7 +30,7 @@ export const createPost = async (req, res) => {
       description,
       category: category || "Other",
       urgency: urgency || "Medium",
-      image: imageUrl,  // ✅ now always defined
+      image: imageUrl,
       status: "Open",
       location: loc,
     });
@@ -46,7 +48,6 @@ export const createPost = async (req, res) => {
   }
 };
 
-
 /** GET /api/posts?search=&lat=&lng= */
 export const getPosts = async (req, res) => {
   try {
@@ -63,7 +64,7 @@ export const getPosts = async (req, res) => {
     if (lat && lng) {
       cursor = cursor.where("location").near({
         center: { type: "Point", coordinates: [Number(lng), Number(lat)] },
-        maxDistance: 50000, // 50 km
+        maxDistance: 50000,
         spherical: true,
       });
     }
@@ -110,9 +111,14 @@ export const updatePost = async (req, res) => {
     if (description !== undefined) post.description = description;
     if (category !== undefined) post.category = category;
     if (urgency !== undefined) post.urgency = urgency;
-    if (image !== undefined) post.image = image;
 
-    // ✅ update location safely
+    // Prefer newly uploaded Cloudinary file
+    if (req.file) {
+      post.image = req.file.path || req.file.secure_url;
+    } else if (image !== undefined) {
+      post.image = image;
+    }
+
     if (location) {
       if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
         post.location = { type: "Point", coordinates: location.coordinates };

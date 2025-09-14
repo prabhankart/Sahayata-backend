@@ -1,4 +1,3 @@
-// routes/postRoutes.js
 import express from "express";
 import { protect } from "../middleware/authMiddleware.js";
 import {
@@ -17,10 +16,7 @@ import Post from "../models/Post.js";
 
 const router = express.Router();
 
-/* ---------- My Posts (for the chat PostPicker) ----------
-   IMPORTANT: this MUST come BEFORE any '/:id' routes so it doesn't get
-   swallowed by '/:id' and passed to getPostById.
-*/
+/* ---------- My Posts (for the chat PostPicker) ---------- */
 router.get("/mine", protect, async (req, res) => {
   try {
     const rows = await Post.find({
@@ -32,7 +28,7 @@ router.get("/mine", protect, async (req, res) => {
       ],
     })
       .sort({ updatedAt: -1 })
-      .select("_id title status coverUrl imageUrl images createdAt")
+      .select("_id title status coverUrl imageUrl image images createdAt")
       .lean();
 
     const list = rows.map((p) => ({
@@ -42,6 +38,7 @@ router.get("/mine", protect, async (req, res) => {
       coverUrl:
         p.coverUrl ||
         p.imageUrl ||
+        p.image ||
         (Array.isArray(p.images) && p.images.length ? p.images[0] : null),
       createdAt: p.createdAt,
     }));
